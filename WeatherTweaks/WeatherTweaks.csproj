@@ -69,6 +69,7 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy "$(TargetDir)\$(TargetFileName)" "Z:" /q /y /i</PostBuildEvent>
+    <PostBuildEvent>xcopy "$(TargetDir)\$(TargetFileName)" "Z:" /q /y /i
+xcopy "$(TargetDir)\$(TargetFileName)" "Z:\WeatherTweaks\plugins" /q /y /i</PostBuildEvent>
   </PropertyGroup>
 </Project>
