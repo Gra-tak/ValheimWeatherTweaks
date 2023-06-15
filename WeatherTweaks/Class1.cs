@@ -231,7 +231,7 @@ namespace WeatherTweaks
                 var it = configs.GetEnumerator();
                 var itBool = configsBool.GetEnumerator();
                 repeats.Clear();
-                foreach (var biome in EnvMan.m_instance.m_biomes)
+                foreach (var biome in EnvMan.s_instance.m_biomes)
                 {
                     foreach (var e in biome.m_environments)
                     {
