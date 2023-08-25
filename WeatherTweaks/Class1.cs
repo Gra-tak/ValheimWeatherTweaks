@@ -231,7 +231,7 @@ namespace WeatherTweaks
                 var it = configs.GetEnumerator();
                 var itBool = configsBool.GetEnumerator();
                 repeats.Clear();
-                foreach (var biome in EnvMan.s_instance.m_biomes)
+                foreach (var biome in EnvMan.instance.m_biomes)
                 {
                     foreach (var e in biome.m_environments)
                     {
@@ -271,7 +271,6 @@ namespace WeatherTweaks
                 RenderSettings.fogDensity *= _fogMultiplier.Value;
             }
         }
-
 
 
         [HarmonyPatch(typeof(Terminal), "InputText")]
