@@ -87,7 +87,7 @@ namespace BepInEx.Configuration
 
 namespace WeatherTweaks
 {
-    [BepInPlugin(PluginId, "Weather Tweaks", "1.0.0")]
+    [BepInPlugin(PluginId, "Weather Tweaks", "1.1.0")]
     public class WeatherTweaks : BaseUnityPlugin
     {
 
@@ -96,7 +96,12 @@ namespace WeatherTweaks
         private static WeatherTweaks _instance;
         private static ConfigEntry<bool> _loggingEnabled;
         public static ConfigEntry<float> _fogMultiplier;
+        public static ConfigEntry<bool> _mistland_very_clear_after_queen_defeated;
+        public static ConfigEntry<string> _extraWeathers;
 
+        //reset on reload (EnvMan awake):
+        public static bool QueenDefeated = false;
+        public static bool QueenWasAliveAtStart = false;
         public static List<ConfigEntry<float>> configs = new List<ConfigEntry<float>>();
         public static List<ConfigEntry<bool>> configsBool = new List<ConfigEntry<bool>>();
 
@@ -133,6 +138,8 @@ namespace WeatherTweaks
             _instance.Config.SaveOnConfigSet = false;
             _loggingEnabled = Config.Bind("Logging", "Logging Enabled", false, "Enable logging.");
             _fogMultiplier = Config.Bind("Global", "Fog multiplier", 1f, "Multiplier applied to all fog settings in the game (should also effect non-biome environments). Multiplicative with all fog settngs done by this mod.");
+            _mistland_very_clear_after_queen_defeated = Config.Bind("Global", "Partly fogless Mistland after defeated boss", false, "Enables a forth weather in the mistlands once its boss is defeated that has no extra mist, more brightness and no clouds with weight 1.5 (the same weight as the normal dry mistland weather). If set to false, the forth weather is enabled at any time as long as the weight in Mistland_very_clear is non-zero (it is zero by default).");
+            _extraWeathers = Config.Bind("Global", "Extra Weather", "Mistlands:Mistlands_very_clear", "Add an additional weather type to a biome. This will start as a copy of the first weather of this biome, but can be configured by the user once created. Formatting: '<Biome>:<Name of new weather type>,<Biome2>:<Name of further new weather type>'. Example: 'Mistlands:Mistlands_very_clear, Swamp:Swamp_Dry'.");
         }
 
         private void OnDestroy()
@@ -140,6 +147,19 @@ namespace WeatherTweaks
             _instance = null;
             _harmony?.UnpatchSelf();
         }
+
+        [HarmonyPatch(typeof(EnvMan), "Awake")]
+        private class WeatherPatchLoadInit
+        {
+            private static void Postfix()
+            {
+                QueenDefeated = false;
+                QueenWasAliveAtStart = false;
+                configs.Clear();
+                configsBool.Clear();
+            }
+        }
+
 
 
         [HarmonyPatch(typeof(EnvMan), "InitializeBiomeEnvSetup")]
@@ -158,10 +178,48 @@ namespace WeatherTweaks
                 var = c.Value;
             }
 
+
             public static HashSet<string> repeats = new HashSet<string>();
-            private static void Postfix(BiomeEnvSetup biome)
+            private static void Postfix(BiomeEnvSetup biome, EnvMan __instance)
             {
                 Log("Doing configs for biome : " + biome.m_name);
+                List<string> newWeather = _extraWeathers.Value.Split(',').ToList().ConvertAll(x => x.Trim(' '));
+                foreach (var s in newWeather)
+                {
+                    List<string> biomeAndName = s.Split(':').ToList().ConvertAll(x => x.Trim(' '));
+                    if (biomeAndName[0] == biome.m_name)
+                    {
+                        Log("Adding env entry : " + biomeAndName[1]);
+                        EnvEntry newEntry = new EnvEntry
+                        {
+                            m_environment = biomeAndName[1],
+                            m_env = biome.m_environments[0].m_env.Clone()
+                        };
+                        newEntry.m_env.m_name = biomeAndName[1];
+                        biome.m_environments.Add(newEntry);
+                        __instance.m_environments.Add(newEntry.m_env);
+                        if (biome.m_name == "Mistlands" && biomeAndName[1] == "Mistlands_very_clear") //defaults for this biome that is added by default
+                        {
+                            newEntry.m_env.m_lightIntensityDay = 1.6f;
+                            newEntry.m_env.m_lightIntensityNight = 0.8f;
+                            newEntry.m_env.m_rainCloudAlpha = 0f;
+                            newEntry.m_weight = 0f;
+                        }
+                    }
+                }
+                //if (biome.m_name=="Mistlands" && ZoneSystem.instance.GetGlobalKey("defeated_queen"))
+                //{
+                //    Log("Adding env entry");
+                //    EnvEntry newEntry = new EnvEntry
+                //    {
+                //        m_environment = "Mistlands_very_clear",
+                //        m_env = biome.m_environments[0].m_env.Clone()
+                //    };
+                //    newEntry.m_env.m_name = "Mistlands_very_clear";
+                //    biome.m_environments.Add(newEntry);
+                //    __instance.m_environments.Add(newEntry.m_env);
+                //    QueenDefeated = true;
+                //}
                 foreach (var e in biome.m_environments)
                 {
                     //make sure this is also the same members used as in ReApply
@@ -208,16 +266,37 @@ namespace WeatherTweaks
                         //}
                         repeats.Add(e.m_environment);
                     }
-
                 }
                 _instance.Config.SaveShort();
+                //Following doesn't seem to work here as the global key isn't done yet
+                //if (ZoneSystem.instance.GetGlobalKey("defeated_queen"))
+                //    QueenDefeated = true;
+                //if (_mistland_very_clear_after_queen_defeated.Value)
+                //    if (biome.m_name == "Mistlands")
+                //    {
+                //        if (!QueenDefeated) //disable very clear weather if queen is not defeated yet without killing the config. Not needed on the default config but if people change the default is it
+                //        {
+                //            Log("Queen not defeated. Disabling very clear mistlands");
+                //            foreach (var e in biome.m_environments)
+                //                if (e.m_environment == "Mistlands_very_clear")
+                //                    e.m_weight = 0f;
+                //        }
+                //        else
+                //        {
+                //            Log("Queen already defeated. Enabling very clear mistlands");
+                //            foreach (var e in biome.m_environments) //setting weight no non-zero even with the config default of zero as descriped in "Partly fogless Mistland after defeated boss"
+                //                if (e.m_environment == "Mistlands_very_clear")
+                //                    if (e.m_weight == 0f )
+                //                        e.m_weight = 1.5f;
+                //        }
+                //    }
             }
 
             private static void ApplyConfig<T>(ref T f, ref List<ConfigEntry<T>>.Enumerator it)
             {
                 if (it.MoveNext())
                 {
-                    Log("Before: " + f + "after: " + it.Current.Value);
+                    Log(it.Current.Definition.ToString()+": Before: " + f + ". After: " + it.Current.Value);
                     f = it.Current.Value;
                 }
                 else
@@ -233,8 +312,11 @@ namespace WeatherTweaks
                 repeats.Clear();
                 foreach (var biome in EnvMan.instance.m_biomes)
                 {
+                    Log(biome.m_name + "starting");
                     foreach (var e in biome.m_environments)
                     {
+                        if (biome.m_name == "Ocean" && e.m_env.m_name == "Ashlands_SeaStorm")
+                            continue; //seems to be dynamically added later and messes up my config... Probably copies config from ashland oceans
                         //make sure this is also the same members used as in Postfix
                         ApplyConfig(ref e.m_weight, ref it);
                         if (!repeats.Contains(e.m_environment))
@@ -256,8 +338,11 @@ namespace WeatherTweaks
                             ApplyConfig(ref e.m_env.m_isFreezingAtNight, ref itBool);
                             ApplyConfig(ref e.m_env.m_isWet, ref itBool);
                             ApplyConfig(ref e.m_env.m_psystemsOutsideOnly, ref itBool);
+                            Log(biome.m_name + " applied " + e.m_env.m_name);
                             repeats.Add(e.m_environment);
                         }
+                        else
+                            Log(biome.m_name + " repeat skipped " + e.m_env.m_name);
                     }
                 }
             }
@@ -271,6 +356,90 @@ namespace WeatherTweaks
                 RenderSettings.fogDensity *= _fogMultiplier.Value;
             }
         }
+
+
+        [HarmonyPatch(typeof(Mister), "GetDemistersSorted")] //yeah. This name is incorrect in Valheim. Those are the Misters, not the Demisters. Expect this to break in future patches...
+        public static class WeatherTweakRemoveMist
+        {
+            public static void Postfix(Vector3 refPoint, ref List<Mister> __result)
+            {
+                if (EnvMan.instance.GetCurrentEnvironment().m_name == "Mistlands_very_clear")
+                    __result=new List<Mister>();
+            }
+        }
+
+        [HarmonyPatch(typeof(EnvMan), "Update")] //yeah. This name is incorrect in Valheim. Those are the Misters, not the Demisters. Expect this to break in future patches...
+        public static class WeatherTweakQueenDefeated
+        {
+            public static void Postfix(EnvMan __instance)
+            {
+                if (!QueenDefeated && !QueenWasAliveAtStart && !ZoneSystem.instance.GetGlobalKey("defeated_queen"))
+                {
+                    QueenWasAliveAtStart = true;
+                    if (_mistland_very_clear_after_queen_defeated.Value)
+                        foreach (BiomeEnvSetup biome in __instance.m_biomes)
+                            if (biome.m_name == "Mistlands")
+                            {
+                                foreach (var e in biome.m_environments)
+                                    if (e.m_environment == "Mistlands_very_clear")
+                                    {
+                                        e.m_weight = 0f;
+                                        Log("Queen not defeated. Disabling very clear mistlands");
+                                    }
+                            }
+                }
+                if (!QueenDefeated && ZoneSystem.instance.GetGlobalKey("defeated_queen"))
+                {
+                    QueenDefeated = true;
+                    if (_mistland_very_clear_after_queen_defeated.Value)
+                        foreach (BiomeEnvSetup biome in __instance.m_biomes)
+                            if (biome.m_name == "Mistlands")
+                            {
+                                foreach (var e in biome.m_environments) //setting weight no non-zero even with the config default of zero as descriped in "Partly fogless Mistland after defeated boss"
+                                    if (e.m_environment == "Mistlands_very_clear")
+                                    {
+                                        ConfigEntry<float> c;
+                                        if (_instance.Config.TryGetEntry<float>(new ConfigDefinition(biome.m_name + "_" + e.m_environment, "m_weight"),out c))
+                                            e.m_weight = c.Value;
+                                        //WeatherPatch.SetConfig(biome, e, "m_weight", ref e.m_weight, "Weight of this enviroment.");
+                                        if (e.m_weight == 0f)
+                                            e.m_weight = 1.5f;
+                                        if (QueenWasAliveAtStart) //"force" enabling the new environment (just until the next weather change)
+                                            __instance.m_currentEnv = e.m_env;
+                                        Log("Queen defeated. Enabling very clear mistlands");
+                                    }
+                            }
+
+                    //foreach (BiomeEnvSetup biome in __instance.m_biomes)
+                    //{
+                    //    if (biome.m_name == "Mistlands")
+                    //    {
+                    //        Log("Trying to add env entry");
+                    //        EnvEntry newEntry = new EnvEntry
+                    //        {
+                    //            m_environment = "Mistlands_very_clear",
+                    //            m_env = biome.m_environments[0].m_env.Clone()
+                    //        };
+                    //        newEntry.m_env.m_name = "Mistlands_very_clear";
+                    //        biome.m_environments.Add(newEntry);
+                    //        __instance.m_environments.Add(newEntry.m_env);
+                    //        QueenDefeated = true;
+                    //        WeatherPatch.ReApply();
+                    //        __instance.m_currentEnv = newEntry.m_env;
+                    //    }
+                    //}
+                }
+            }
+        }
+
+        //[HarmonyPatch(typeof(EnvMan), "SetEnv")]
+        //private static class Test2
+        //{
+        //    private static void Postfix(EnvSetup env)
+        //    {
+        //        Log("Env name"+env.m_name);
+        //    }
+        //}
 
 
         [HarmonyPatch(typeof(Terminal), "InputText")]
